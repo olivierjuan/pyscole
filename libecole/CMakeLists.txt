@@ -29,6 +29,7 @@ add_library(
 	src/reward/bound-integral.cpp
 
 	src/observation/node-bipartite.cpp
+	src/observation/branching-tree.cpp
 	src/observation/milp-bipartite.cpp
 	src/observation/khalil-2016.cpp
 	src/observation/hutter-2011.cpp
@@ -38,6 +39,7 @@ add_library(
 	src/dynamics/parts.cpp
 	src/dynamics/branching.cpp
 	src/dynamics/configuring.cpp
+	src/dynamics/node-selection.cpp
 	src/dynamics/primal-search.cpp
 )
 
@@ -94,7 +96,11 @@ target_include_directories(
 include(dependencies/public.cmake)
 include(dependencies/private.cmake)
 
+SET(SCIP_DIR dependencies/scip/8.1.0/lib/cmake/scip)
 find_package(SCIP 8 REQUIRED)
+#set(IPOPT OFF CACHE BOOL "Disable IPOPT" FORCE)
+#set(BUILD_TESTING OFF CACHE BOOL "Disable tests" FORCE)
+#add_subdirectory(dependencies/scipoptsuite-8.1.0)
 find_package(Threads REQUIRED)
 find_package(xtl REQUIRED)
 find_package(xsimd REQUIRED)

@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <objscip/objbranchrule.h>
+#include <objscip/objnodesel.h>
 #include <objscip/objheur.h>
 #include <scip/scip.h>
 #include <scip/scipdefplugins.h>
@@ -26,7 +27,7 @@ namespace ecole::scip {
 
 namespace {
 
-using Controller = utility::Coroutine<callback::DynamicCall, SCIP_RESULT>;
+using Controller = utility::Coroutine<callback::DynamicCall, std::variant<SCIP_RESULT, SCIP_NODE*>>;
 using Executor = typename Controller::Executor;
 
 /**
@@ -46,13 +47,13 @@ auto include_reverse_callback(SCIP* scip, std::weak_ptr<Executor> executor, call
  */
 template <callback::Type type>
 auto handle_executor(SCIP* scip, std::weak_ptr<Executor>& weak_executor, callback::Call<type> call) noexcept
-	-> std::tuple<SCIP_RETCODE, SCIP_RESULT> {
+	-> std::tuple<SCIP_RETCODE, std::variant<SCIP_RESULT, SCIP_NODE*>> {
 	if (weak_executor.expired()) {
 		return {SCIP_OKAY, SCIP_DIDNOTRUN};
 	}
 	try {
 		return std::visit(
-			[&](auto result_or_stop) -> std::tuple<SCIP_RETCODE, SCIP_RESULT> {
+			[&](auto result_or_stop) -> std::tuple<SCIP_RETCODE, std::variant<SCIP_RESULT, SCIP_NODE*>> {
 				using StopToken = Executor::StopToken;
 				if constexpr (std::is_same_v<decltype(result_or_stop), StopToken>) {
 					return {SCIPinterruptSolve(scip), SCIP_DIDNOTRUN};
@@ -106,7 +107,11 @@ private:
 
 	auto scip_exec_any(SCIP* scip, SCIP_RESULT* result, callback::BranchruleCall call) -> SCIP_RETCODE {
 		auto retcode = SCIP_OKAY;
-		std::tie(retcode, *result) = handle_executor(scip, m_weak_executor, call);
+		auto const res = handle_executor(scip, m_weak_executor, call);
+		retcode = std::get<0>(res);
+		if (std::holds_alternative<SCIP_RESULT>(std::get<1>(res))) {
+			*result = std::get<SCIP_RESULT>(std::get<1>(res));
+		}
 		return retcode;
 	}
 };
@@ -120,6 +125,67 @@ auto include_reverse_callback<callback::Type::Branchrule>(
 		SCIPincludeObjBranchrule,
 		scip,
 		new ReverseBranchrule(scip, args.priority, args.max_depth, args.max_bound_distance, std::move(executor)),
+		true);
+}  // NOLINT
+
+
+class ReverseNodeSel : public ::scip::ObjNodesel {
+public:
+	ReverseNodeSel(
+		SCIP* scip,
+		int priority,
+		int priority_mem,
+		std::weak_ptr<Executor> weak_executor) :
+		ObjNodesel{
+			scip,
+			name(callback::Type::NodeSelection),
+			"NodeSelection that wait for another thread to make the node selection.",
+			priority,
+			priority_mem},
+		m_weak_executor{std::move(weak_executor)} {}
+
+	auto scip_select(SCIP* scip, SCIP_NODESEL* /*nodesel*/, SCIP_NODE** selnode)
+		-> SCIP_RETCODE override {
+		using Where = callback::NodeSelectionCall::Where;
+		return scip_exec_any(scip, selnode, {nullptr, nullptr, Where::Select});
+	}
+
+	auto scip_comp(SCIP* scip, SCIP_NODESEL* /*nodesel*/, SCIP_NODE* node1, SCIP_NODE* node2)
+		-> int override {
+		using Where = callback::NodeSelectionCall::Where;
+		int result = 0;
+		scip_exec_any(scip, &result, { node1, node2, Where::Compare});
+		return result;
+	}
+
+private:
+	std::weak_ptr<Executor> m_weak_executor;
+
+	template <typename T>
+	auto scip_exec_any(SCIP* scip, T* result, callback::NodeSelectionCall call) -> SCIP_RETCODE {
+		auto retcode = SCIP_OKAY;
+		auto const res = handle_executor(scip, m_weak_executor, call);
+		retcode = std::get<0>(res);
+		std::visit(
+			[&](auto value) {
+				if constexpr (std::is_same_v<decltype(value), T>) {
+					*result = value;
+				}
+			},
+			std::get<1>(res));
+		return retcode;
+	}
+};
+
+template <>
+auto include_reverse_callback<callback::Type::NodeSelection>(
+	SCIP* scip,
+	std::weak_ptr<Executor> executor,
+	callback::Constructor<callback::Type::NodeSelection> args) -> void {
+	scip::call(
+		SCIPincludeObjNodesel,
+		scip,
+		new ReverseNodeSel(scip, args.priority, args.priority_mem, std::move(executor)),
 		true);
 }  // NOLINT
 
@@ -153,8 +219,12 @@ public:
 		SCIP_Bool node_infeasible,
 		SCIP_RESULT* result) -> SCIP_RETCODE override {
 		auto retcode = SCIP_OKAY;
-		std::tie(retcode, *result) = handle_executor(
+		auto const res = handle_executor(
 			scip, m_weak_executor, callback::HeuristicCall{heuristic_timing, static_cast<bool>(node_infeasible)});
+		retcode = std::get<0>(res);
+		if (std::holds_alternative<SCIP_RESULT>(std::get<1>(res))) {
+			*result = std::get<SCIP_RESULT>(std::get<1>(res));
+		}
 		return retcode;
 	}
 
@@ -258,6 +328,11 @@ auto Scimpl::solve_iter(nonstd::span<callback::DynamicConstructor const> arg_pac
 }
 
 auto Scimpl::solve_iter_continue(SCIP_RESULT result) -> std::optional<callback::DynamicCall> {
+	m_controller->resume(result);
+	return m_controller->wait();
+}
+
+auto Scimpl::solve_iter_continue(SCIP_NODE* result) -> std::optional<callback::DynamicCall> {
 	m_controller->resume(result);
 	return m_controller->wait();
 }

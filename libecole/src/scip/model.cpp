@@ -212,6 +212,20 @@ nonstd::span<SCIP_VAR*> Model::lp_branch_cands() const {
 	return {vars, static_cast<std::size_t>(n_vars)};
 }
 
+std::tuple<nonstd::span<SCIP_NODE*>, nonstd::span<SCIP_NODE*>, nonstd::span<SCIP_NODE*> > Model::get_open_nodes() const {
+	int n_vars = 0;
+	SCIP_NODE** leaves = nullptr;
+	SCIP_NODE** children = nullptr;           /**< pointer to store the children, or NULL if not needed */
+	SCIP_NODE** siblings = nullptr;           /**< pointer to store the siblings, or NULL if not needed */
+	int         n_leaves = 0;            /**< pointer to store the number of leaves, or NULL */
+	int         n_children = 0;          /**< pointer to store the number of children, or NULL */
+	int         n_siblings = 0;           /**< pointer to store the number of siblings, or NULL */
+	scip::call(
+		SCIPgetOpenNodesData, const_cast<SCIP*>(get_scip_ptr()), &leaves, &children, &siblings, &n_leaves, &n_children, &n_siblings);
+	return {{leaves, static_cast<std::size_t>(n_leaves)}, {children, static_cast<std::size_t>(n_children)}, {siblings, static_cast<std::size_t>(n_siblings)}};
+}
+
+
 nonstd::span<SCIP_VAR*> Model::pseudo_branch_cands() const {
 	int n_vars = 0;
 	SCIP_VAR** vars = nullptr;
@@ -303,8 +317,8 @@ auto Model::solve_iter(callback::DynamicConstructor arg_pack) -> std::optional<c
 	return solve_iter({&arg_pack, 1});
 }
 
-auto Model::solve_iter_continue(SCIP_RESULT result) -> std::optional<callback::DynamicCall> {
-	return scimpl->solve_iter_continue(result);
+auto Model::solve_iter_continue(std::variant<SCIP_RESULT, SCIP_NODE*> result) -> std::optional<callback::DynamicCall> {
+	std::visit([&](auto result) { return scimpl->solve_iter_continue(result); }, result);
 }
 
 }  // namespace ecole::scip

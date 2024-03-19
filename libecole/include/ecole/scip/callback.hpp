@@ -4,6 +4,7 @@
 #include <variant>
 
 #include <scip/type_timing.h>
+#include <scip/struct_tree.h>
 
 #include "ecole/utility/unreachable.hpp"
 
@@ -15,7 +16,7 @@
 namespace ecole::scip::callback {
 
 /** Type of rverse callback available. */
-enum struct Type { Branchrule, Heuristic };
+enum struct Type { Branchrule, Heuristic, NodeSelection };
 
 /** Return the name used for the reverse callback. */
 constexpr auto name(Type type) {
@@ -24,6 +25,8 @@ constexpr auto name(Type type) {
 		return "ecole::scip::StopLocation::Branchrule";
 	case Type::Heuristic:
 		return "ecole::scip::StopLocation::Heuristic";
+	case Type::NodeSelection:
+		return "ecole::scip::StopLocation::NodeSelection";
 	default:
 		utility::unreachable();
 	}
@@ -56,7 +59,14 @@ template <> struct Constructor<Type::Heuristic> {
 };
 using HeuristicConstructor = Constructor<Type::Heuristic>;
 
-using DynamicConstructor = std::variant<Constructor<Type::Branchrule>, Constructor<Type::Heuristic>>;
+/** Parameter passed to create a reverse heurisitc. */
+template <> struct Constructor<Type::NodeSelection> {
+	int priority = priority_max;
+	int priority_mem = priority_max;
+};
+using NodeSelectionConstructor = Constructor<Type::NodeSelection>;
+
+using DynamicConstructor = std::variant<Constructor<Type::Branchrule>, Constructor<Type::Heuristic>, Constructor<Type::NodeSelection>>;
 
 /** Parameter given by SCIP to the callback function. */
 template <Type type> struct Call;
@@ -78,6 +88,15 @@ template <> struct Call<Type::Heuristic> {
 };
 using HeuristicCall = Call<Type::Heuristic>;
 
-using DynamicCall = std::variant<Call<Type::Branchrule>, Call<Type::Heuristic>>;
+/** Parameter given by SCIP to the heuristic functions. */
+template <> struct Call<Type::NodeSelection> {
+	enum struct Where { Select, Compare };
+	SCIP_NODE* node1;
+	SCIP_NODE* node2;
+	Where where;
+};
+using NodeSelectionCall = Call<Type::NodeSelection>;
+
+using DynamicCall = std::variant<Call<Type::Branchrule>, Call<Type::Heuristic>, Call<Type::NodeSelection>>;
 
 }  // namespace ecole::scip::callback

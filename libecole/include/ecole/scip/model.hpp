@@ -130,6 +130,7 @@ public:
 
 	[[nodiscard]] ECOLE_EXPORT nonstd::span<SCIP_VAR*> variables() const noexcept;
 	[[nodiscard]] ECOLE_EXPORT nonstd::span<SCIP_VAR*> lp_branch_cands() const;
+  [[nodiscard]] ECOLE_EXPORT std::tuple<nonstd::span<SCIP_NODE*>, nonstd::span<SCIP_NODE*>, nonstd::span<SCIP_NODE*> > get_open_nodes() const;
 	[[nodiscard]] ECOLE_EXPORT nonstd::span<SCIP_VAR*> pseudo_branch_cands() const;
 	[[nodiscard]] ECOLE_EXPORT nonstd::span<SCIP_COL*> lp_columns() const;
 	[[nodiscard]] ECOLE_EXPORT nonstd::span<SCIP_CONS*> constraints() const noexcept;
@@ -209,7 +210,7 @@ public:
 	 * @return The callback arguments where iterative solving has stopped, or nothing if solving has terminated.
 	 * @see solve_iter_continue
 	 */
-	ECOLE_EXPORT auto solve_iter_continue(SCIP_RESULT result) -> std::optional<callback::DynamicCall>;
+	ECOLE_EXPORT auto solve_iter_continue(std::variant<SCIP_RESULT, SCIP_NODE*> result) -> std::optional<callback::DynamicCall>;
 
 private:
 	std::unique_ptr<Scimpl> scimpl;
